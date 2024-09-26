@@ -10,6 +10,15 @@ const preFillData = {
   // "TextField3": "2024-09-25"
 };
 
+const handleSave = (signedPdf: Blob) => {
+  // Example: download the signed PDF
+  const link = document.createElement("a");
+  link.href = window.URL.createObjectURL(signedPdf);
+  link.download = "signed-document.pdf";
+  link.click();
+};
+
+
   return (
     <div className="App" style={{ width: "100vw" }}>
       <div className="PDF-viewer">
