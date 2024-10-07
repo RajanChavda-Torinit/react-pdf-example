@@ -23,7 +23,7 @@ const handleSave = (signedPdf: Blob) => {
   return (
     <div className="App" style={{ width: "100vw" }}>
       <div className="PDF-viewer">
-        <PdfViewerComponent document={"document.pdf"} preFillData={preFillData}/>
+        <PdfViewerComponent document={"document.pdf"} />
       </div>
     </div>
   );
