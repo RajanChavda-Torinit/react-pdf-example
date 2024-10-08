@@ -26,9 +26,19 @@ const PDFViewerWithSignature = (props: any) => {
   const [boxSizes, setBoxSizes] = useState<any[]>([]); // Store bounding boxes for each user
 
   useEffect(() => {
+    const storedUsers = sessionStorage.getItem("users");
+    const storedBoxSizes = sessionStorage.getItem("boxSizes");
+
+    if (storedUsers) {
+      setUsers(JSON.parse(storedUsers));
+    }
+
+    if (storedBoxSizes) {
+      setBoxSizes(JSON.parse(storedBoxSizes));
+    }
+
     const loadPdf = async () => {
       if (containerRef.current) {
-        // Ensure it is not null
         try {
           const instance = await PSPDFKit.load({
             container: containerRef.current,
@@ -38,7 +48,34 @@ const PDFViewerWithSignature = (props: any) => {
             }`,
           });
           setInstance(instance);
-          console.log("PSPDFKit loaded successfully");
+
+          console.log(PSPDFKit, "pspdfkit")
+
+          if (storedUsers && storedBoxSizes) {
+            const usersData = JSON.parse(storedUsers);
+            const boxData = JSON.parse(storedBoxSizes);
+
+            usersData.forEach((user: any, index: number) => {
+              const boundingBox = new PSPDFKit.Geometry.Rect(boxData[index]);
+              const instantId = `PSPDFKit.generateInstantId(${index})`;
+
+              const widget = new PSPDFKit.Annotations.WidgetAnnotation({
+                formFieldName: `SignatureField${index}`,
+                name: instantId,
+                id: instantId,
+                boundingBox: boundingBox,
+                pageIndex: 0,
+              });
+
+              const formField = new PSPDFKit.FormFields.SignatureFormField({
+                name: `SignatureField${index}`,
+                annotationIds: PSPDFKit.Immutable.List([widget.id]),
+                id: instantId,
+              });
+
+              instance.create([widget, formField]);
+            });
+          }
         } catch (error) {
           console.error("Error loading PSPDFKit", error);
         }
@@ -55,27 +92,21 @@ const PDFViewerWithSignature = (props: any) => {
   const applySignature = async (index: number) => {
     if (!instance) {
       alert("PDF instance is not ready. Please try again.");
-      return; // Exit the function if instance is null
+      return;
     }
 
     try {
-      console.log("Start signing for user", users[index].name);
-
-      // Get the current PDF from the instance
       const doc = await instance.exportPDF();
       const pdfBlob = new Blob([doc], { type: "application/pdf" });
 
-      // Get the image for the signature
       const imageBlob = await imageToBlob(
         `${window.location.protocol}//${window.location.host}/signed/watermark.jpg`
       );
 
-      // Prepare form data
       const formData = new FormData();
       formData.append("file", pdfBlob);
       formData.append("image", imageBlob);
 
-      // Signature data specific to the user
       formData.append(
         "data",
         JSON.stringify({
@@ -94,8 +125,7 @@ const PDFViewerWithSignature = (props: any) => {
         })
       );
 
-      // Call the signing API
-      const apiToken = "pdf_live_0zn80VlV41NgrPowcDESx5znFUERRzIdMGvjLvhz3QK";
+      const apiToken = "pdf_live_kmuMaiweSJgJsnKXeJee73Ys2ViDkY7SlCIaMCgkTkU";
       const res = await axios.post("https://api.pspdfkit.com/sign", formData, {
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -110,6 +140,14 @@ const PDFViewerWithSignature = (props: any) => {
         const newPdfUrl = URL.createObjectURL(signedPdfBlob);
         setInitialLoad(false);
         setPdfUrl(newPdfUrl);
+
+        // Update the signed status for the current user
+        const updatedUsers = [...users];
+        updatedUsers[index].signed = true; // Mark the user as signed
+        setUsers(updatedUsers);
+
+        // Update session storage
+        sessionStorage.setItem("users", JSON.stringify(updatedUsers));
       } else {
         alert("Error in signing");
       }
@@ -129,19 +167,18 @@ const PDFViewerWithSignature = (props: any) => {
       const instantId = `PSPDFKit.generateInstantId(${users.length})`;
 
       const boundingBox = new PSPDFKit.Geometry.Rect({
-        left: 50 + users.length * 180, // Create a new box shifted horizontally for each new user
-        top: 550, // Y position remains the same for simplicity
+        left: 50 + users.length * 180,
+        top: 550,
         width: 150,
         height: 100,
       });
 
-      // Create a widget for the new user
       const widget = new PSPDFKit.Annotations.WidgetAnnotation({
         formFieldName: `SignatureField${users.length}`,
         name: instantId,
         id: instantId,
         boundingBox: boundingBox,
-        pageIndex: 0, // First page
+        pageIndex: 0,
       });
 
       const formField = new PSPDFKit.FormFields.SignatureFormField({
@@ -150,12 +187,21 @@ const PDFViewerWithSignature = (props: any) => {
         id: instantId,
       });
 
+      console.log(formField, "formfield");
+
       await instance.create([widget, formField]);
 
-      setUsers((prevUsers) => [...prevUsers, { name, email }]);
-      setBoxSizes((prevBoxSizes) => [...prevBoxSizes, boundingBox]);
+      const updatedUsers = [
+        ...users,
+        { name, email, signed: false }, 
+      ];
+      const updatedBoxSizes = [...boxSizes, boundingBox];
 
-      console.log(`Bounding box created for user: ${name}`);
+      setUsers(updatedUsers);
+      setBoxSizes(updatedBoxSizes);
+
+      sessionStorage.setItem("users", JSON.stringify(updatedUsers));
+      sessionStorage.setItem("boxSizes", JSON.stringify(updatedBoxSizes));
     }
   };
 
@@ -178,7 +224,6 @@ const PDFViewerWithSignature = (props: any) => {
           Add New
         </button>
 
-        {/* Display all users below the "Add New" button */}
         <div style={{ marginTop: "20px" }}>
           {users.length === 0 ? (
             <p>No users added yet.</p>
