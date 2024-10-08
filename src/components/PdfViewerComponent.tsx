@@ -141,12 +141,10 @@ const PDFViewerWithSignature = (props: any) => {
         setInitialLoad(false);
         setPdfUrl(newPdfUrl);
 
-        // Update the signed status for the current user
         const updatedUsers = [...users];
-        updatedUsers[index].signed = true; // Mark the user as signed
+        updatedUsers[index].signed = true;
         setUsers(updatedUsers);
 
-        // Update session storage
         sessionStorage.setItem("users", JSON.stringify(updatedUsers));
       } else {
         alert("Error in signing");
@@ -193,7 +191,7 @@ const PDFViewerWithSignature = (props: any) => {
 
       const updatedUsers = [
         ...users,
-        { name, email, signed: false }, 
+        { name, email, signed: false },
       ];
       const updatedBoxSizes = [...boxSizes, boundingBox];
 
@@ -202,6 +200,14 @@ const PDFViewerWithSignature = (props: any) => {
 
       sessionStorage.setItem("users", JSON.stringify(updatedUsers));
       sessionStorage.setItem("boxSizes", JSON.stringify(updatedBoxSizes));
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const newPdfUrl = URL.createObjectURL(file);
+      setPdfUrl(newPdfUrl);
     }
   };
 
@@ -245,6 +251,10 @@ const PDFViewerWithSignature = (props: any) => {
               </div>
             ))
           )}
+        </div>
+
+        <div style={{ marginTop: "20px" }}>
+          <input type="file" accept="application/pdf" onChange={handleFileUpload} />
         </div>
       </div>
     </div>
