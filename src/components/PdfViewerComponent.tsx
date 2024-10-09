@@ -125,7 +125,7 @@ const PDFViewerWithSignature = (props: any) => {
         })
       );
 
-      const apiToken = "pdf_live_kmuMaiweSJgJsnKXeJee73Ys2ViDkY7SlCIaMCgkTkU";
+      const apiToken = "pdf_live_SxEEJuIQLqMfTAPX7P9ebwK1xsMRDz6ept8rjaRP4bI";
       const res = await axios.post("https://api.pspdfkit.com/sign", formData, {
         headers: {
           Authorization: `Bearer ${apiToken}`,
