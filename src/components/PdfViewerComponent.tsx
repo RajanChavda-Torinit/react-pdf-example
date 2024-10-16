@@ -39,6 +39,57 @@ const PDFViewerWithSignature = (props: any) => {
   const [instance, setInstance] = useState<any>(null);
   const [currentPdfKey, setCurrentPdfKey] = useState<string | null>(null); // Store the current PDF key
 
+  useEffect(() => {
+    if (pdfUrl && currentPdfKey) {
+      (async () => {
+        try {
+          const instance = await PSPDFKit.load({
+            container: containerRef.current,
+            document: pdfUrl,
+            baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
+          });
+
+          setInstance(instance);
+
+          const container = instance.contentDocument?.host;
+
+          container.addEventListener("dragover", (e: React.DragEvent<HTMLDivElement>) => e.preventDefault());
+          container.addEventListener("drop", async (e: React.DragEvent<HTMLDivElement>) => {
+            console.log("Drop event detected!");
+            await handleDrop(e, instance, PSPDFKit);
+          });
+
+          // Restore stored signature coordinates if available
+          const storedCoordinates = getStoredSignatureData(currentPdfKey);
+
+          if (storedCoordinates) {
+            console.log("Restoring coordinates for current PDF:", storedCoordinates);
+            const widget = new PSPDFKit.Annotations.TextAnnotation({
+              boundingBox: storedCoordinates,
+              text: { format: "plain", value: "Sign for TestUser" },
+              formFieldName: "DigitalSignature",
+              id: PSPDFKit.generateInstantId(),
+              pageIndex: storedCoordinates.pageIndex,
+              customData: { type: "ds" },
+            });
+            const formField = new PSPDFKit.FormFields.SignatureFormField({
+              annotationIds: PSPDFKit.Immutable.List([widget.id]),
+              name: "DigitalSignature",
+              id: PSPDFKit.generateInstantId(),
+            });
+            await instance.create([widget, formField]);
+          }
+        } catch (error) {
+          console.error("Error loading PSPDFKit:", error);
+        }
+      })();
+    }
+
+    return () => {
+      if (pdfUrl) PSPDFKit.unload(containerRef.current);
+    };
+  }, [pdfUrl, currentPdfKey]);
+
   
   // Store multiple signature coordinates for each PDF
 const storeSignatureData = (pdfKey: string, coordinates: any) => {
@@ -152,182 +203,135 @@ const getStoredSignatureData = (pdfKey: string) => {
     }
   };
 
-  useEffect(() => {
-    if (pdfUrl && currentPdfKey) {
-      (async () => {
-        try {
-          const instance = await PSPDFKit.load({
-            container: containerRef.current,
-            document: pdfUrl,
-            baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
-          });
-
-          setInstance(instance);
-
-          const container = instance.contentDocument?.host;
-
-          container.addEventListener("dragover", (e) => e.preventDefault());
-          container.addEventListener("drop", async (e) => {
-            console.log("Drop event detected!");
-            await handleDrop(e, instance, PSPDFKit);
-          });
-
-          // Restore stored signature coordinates if available
-          const storedCoordinates = getStoredSignatureData(currentPdfKey);
-
-          if (storedCoordinates) {
-            console.log("Restoring coordinates for current PDF:", storedCoordinates);
-            const widget = new PSPDFKit.Annotations.TextAnnotation({
-              boundingBox: storedCoordinates,
-              text: { format: "plain", value: "Sign for TestUser" },
-              formFieldName: "DigitalSignature",
-              id: PSPDFKit.generateInstantId(),
-              pageIndex: storedCoordinates.pageIndex,
-              customData: { type: "ds" },
-            });
-            const formField = new PSPDFKit.FormFields.SignatureFormField({
-              annotationIds: PSPDFKit.Immutable.List([widget.id]),
-              name: "DigitalSignature",
-              id: PSPDFKit.generateInstantId(),
-            });
-            await instance.create([widget, formField]);
-          }
-        } catch (error) {
-          console.error("Error loading PSPDFKit:", error);
-        }
-      })();
-    }
-
-    return () => {
-      if (pdfUrl) PSPDFKit.unload(containerRef.current);
-    };
-  }, [pdfUrl, currentPdfKey]);
-
-  // const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  //   const files = e.target.files;
-  //   if (files) {
-  //     const fileArray = Array.from(files);
-  //     setUploadedFiles((prev) => [...prev, ...fileArray]);
-
-  //     const base64Pdf = await fileToBase64(fileArray[0]);
-  //     const pdfKey = generatePdfKey(fileArray[0]);
-  //     setCurrentPdfKey(pdfKey); // Update current PDF key
-  //     setPdfUrl(base64Pdf);
-  //   }
-  // };
 
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const files = e.target.files;
-  if (files) {
-    const fileArray = Array.from(files);
-    setUploadedFiles((prev) => [...prev, ...fileArray]);
+    const files = e.target.files;
+    console.log(files, "filessss");
+    if (files) {
+      const fileArray = Array.from(files);
+      setUploadedFiles((prev) => [...prev, ...fileArray]);
 
-    const file = fileArray[0];
-    const base64Pdf = await fileToBase64(file);
-    const pdfKey = generatePdfKey(file);
-
-    setCurrentPdfKey(pdfKey); // Update current PDF key
-    setPdfUrl(base64Pdf); // Load the clicked PDF file
-
-    // Wait for the PDF to load in PSPDFKit
-    const instance = await PSPDFKit.load({
-      container: containerRef.current,
-      document: base64Pdf,
-      baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
-    });
-
-    setInstance(instance); // Store the PSPDFKit instance
-
-    // Retrieve and display the signature boxes for this PDF if any exist
-    const storedCoordinates = getStoredSignatureData(pdfKey);
-
-    if (storedCoordinates.length > 0 && instance) {
-      console.log("Restoring signature widgets for PDF:", storedCoordinates);
-
-      for (const signature of storedCoordinates) {
-        const widget = new PSPDFKit.Annotations.TextAnnotation({
-          boundingBox: new PSPDFKit.Geometry.Rect({
-            left: signature.left,
-            top: signature.top,
-            width: signature.width,
-            height: signature.height,
-          }),
-          text: { format: "plain", value: "Sign for TestUser" },
-          formFieldName: "DigitalSignature",
-          id: PSPDFKit.generateInstantId(),
-          pageIndex: signature.pageIndex,
-          customData: { type: "ds" },
-        });
-
-        const formField = new PSPDFKit.FormFields.SignatureFormField({
-          annotationIds: PSPDFKit.Immutable.List([widget.id]),
-          name: "DigitalSignature",
-          id: PSPDFKit.generateInstantId(),
-        });
-
-        await instance.create([widget, formField]); // Apply to the PDF
-      }
-    }
-  }
-};
-
-
-  // const handleFileClick = (file: File) => {
-  //   fileToBase64(file).then((base64Pdf) => {
-  //     const pdfKey = generatePdfKey(file);
-  //     setCurrentPdfKey(pdfKey); // Update current PDF key
-  //     setPdfUrl(base64Pdf); // Load the clicked PDF file
-  //   });
-  // };
-
-  const handleFileClick = async (file: File) => {
-    const base64Pdf = await fileToBase64(file);
-    const pdfKey = generatePdfKey(file);
-    console.log(pdfKey,base64Pdf, "pdfkeyyy");
-    setCurrentPdfKey(pdfKey); // Update current PDF key
-    setPdfUrl(base64Pdf); // Load the clicked PDF file
-  
-    // Wait for PSPDFKit to load the document
-    await PSPDFKit.load({
-      container: containerRef.current,
-      document: pdfKey,
-      baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
-    });
-  
-    // Retrieve the stored coordinates for the PDF and re-apply them
-    const storedCoordinates = getStoredSignatureData(pdfKey);
-  
-    if (storedCoordinates.length > 0 && instance) {
-      console.log("Restoring signature widgets for PDF:", storedCoordinates);
-  
-      // Loop over each stored signature and create the corresponding annotation
-      for (const signature of storedCoordinates) {
-        const widget = new PSPDFKit.Annotations.TextAnnotation({
-          boundingBox: new PSPDFKit.Geometry.Rect({
-            left: signature.left,
-            top: signature.top,
-            width: signature.width,
-            height: signature.height,
-          }),
-          text: { format: "plain", value: "Sign for TestUser" },
-          formFieldName: "DigitalSignature",
-          id: PSPDFKit.generateInstantId(),
-          pageIndex: signature.pageIndex,
-          customData: { type: "ds" },
-        });
-  
-        const formField = new PSPDFKit.FormFields.SignatureFormField({
-          annotationIds: PSPDFKit.Immutable.List([widget.id]),
-          name: "DigitalSignature",
-          id: PSPDFKit.generateInstantId(),
-        });
-  
-        // Create the annotation and form field in PSPDFKit
-        await instance.create([widget, formField]);
-      }
+      const base64Pdf = await fileToBase64(fileArray[0]);
+      const pdfKey = generatePdfKey(fileArray[0]);
+      setCurrentPdfKey(pdfKey); // Update current PDF key
+      setPdfUrl(base64Pdf);
     }
   };
+
+
+//   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+//   const files = e.target.files;
+//   if (files) {
+//     const fileArray = Array.from(files);
+//     setUploadedFiles((prev) => [...prev, ...fileArray]);
+
+//     const file = fileArray[0];
+//     const base64Pdf = await fileToBase64(file);
+//     const pdfKey = generatePdfKey(file);
+
+//     setCurrentPdfKey(pdfKey); // Update current PDF key
+//     setPdfUrl(base64Pdf); // Load the clicked PDF file
+
+//     // Wait for the PDF to load in PSPDFKit
+//     const instance = await PSPDFKit.load({
+//       container: containerRef.current,
+//       document: base64Pdf,
+//       baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
+//     });
+
+//     setInstance(instance); // Store the PSPDFKit instance
+
+//     // Retrieve and display the signature boxes for this PDF if any exist
+//     const storedCoordinates = getStoredSignatureData(pdfKey);
+
+//     if (storedCoordinates.length > 0 && instance) {
+//       console.log("Restoring signature widgets for PDF:", storedCoordinates);
+
+//       for (const signature of storedCoordinates) {
+//         const widget = new PSPDFKit.Annotations.TextAnnotation({
+//           boundingBox: new PSPDFKit.Geometry.Rect({
+//             left: signature.left,
+//             top: signature.top,
+//             width: signature.width,
+//             height: signature.height,
+//           }),
+//           text: { format: "plain", value: "Sign for TestUser" },
+//           formFieldName: "DigitalSignature",
+//           id: PSPDFKit.generateInstantId(),
+//           pageIndex: signature.pageIndex,
+//           customData: { type: "ds" },
+//         });
+
+//         const formField = new PSPDFKit.FormFields.SignatureFormField({
+//           annotationIds: PSPDFKit.Immutable.List([widget.id]),
+//           name: "DigitalSignature",
+//           id: PSPDFKit.generateInstantId(),
+//         });
+
+//         await instance.create([widget, formField]); // Apply to the PDF
+//       }
+//     }
+//   }
+// };
+
+
+  const handleFileClick = (file: File) => {
+    console.log(file, "file");
+    fileToBase64(file).then((base64Pdf) => {
+      const pdfKey = generatePdfKey(file);
+      setCurrentPdfKey(pdfKey); // Update current PDF key
+      setPdfUrl(base64Pdf); // Load the clicked PDF file
+    });
+  };
+
+  // const handleFileClick = async (file: File) => {
+  //   const base64Pdf = await fileToBase64(file);
+  //   const pdfKey = generatePdfKey(file);
+  //   console.log(pdfKey,base64Pdf, "pdfkeyyy");
+  //   setCurrentPdfKey(pdfKey); // Update current PDF key
+  //   setPdfUrl(base64Pdf); // Load the clicked PDF file
+  
+  //   // Wait for PSPDFKit to load the document
+  //   await PSPDFKit.load({
+  //     container: containerRef.current,
+  //     document: pdfKey,
+  //     baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
+  //   });
+  
+  //   // Retrieve the stored coordinates for the PDF and re-apply them
+  //   const storedCoordinates = getStoredSignatureData(pdfKey);
+  
+  //   if (storedCoordinates.length > 0 && instance) {
+  //     console.log("Restoring signature widgets for PDF:", storedCoordinates);
+  
+  //     // Loop over each stored signature and create the corresponding annotation
+  //     for (const signature of storedCoordinates) {
+  //       const widget = new PSPDFKit.Annotations.TextAnnotation({
+  //         boundingBox: new PSPDFKit.Geometry.Rect({
+  //           left: signature.left,
+  //           top: signature.top,
+  //           width: signature.width,
+  //           height: signature.height,
+  //         }),
+  //         text: { format: "plain", value: "Sign for TestUser" },
+  //         formFieldName: "DigitalSignature",
+  //         id: PSPDFKit.generateInstantId(),
+  //         pageIndex: signature.pageIndex,
+  //         customData: { type: "ds" },
+  //       });
+  
+  //       const formField = new PSPDFKit.FormFields.SignatureFormField({
+  //         annotationIds: PSPDFKit.Immutable.List([widget.id]),
+  //         name: "DigitalSignature",
+  //         id: PSPDFKit.generateInstantId(),
+  //       });
+  
+  //       // Create the annotation and form field in PSPDFKit
+  //       await instance.create([widget, formField]);
+  //     }
+  //   }
+  // };
   
 
   const applySignature = async () => {
