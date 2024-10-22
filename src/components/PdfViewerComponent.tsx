@@ -1,33 +1,44 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useEffect, useRef, useState } from "react";
-import PSPDFKit from "pspdfkit";
+import { useEffect, useRef, useState } from "react";
+import PSPDFKit, { Instance } from "pspdfkit";
+import axios from "axios";
 
-// Convert a file to a base64 string
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-};
-
-// Utility to generate a unique key for each PDF based on its name or content
-const generatePdfKey = (file: File | string) => {
-  if (typeof file === "string") return file; // For base64 strings or URLs
-  return file.name; // Use the file name as the key
-};
+async function imageToBlob(imageUrl: string): Promise<Blob> {
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error("Network response was not ok");
+    }
+    const blob = await response.blob();
+    return blob;
+  } catch (error) {
+    console.error("Error fetching image:", error);
+    throw error;
+  }
+}
 
 const PDFViewerWithSignature = (props: any) => {
-  const containerRef = useRef(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null); // Start as null
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [instance, setInstance] = useState<any>(null);
-  const [currentPdfKey, setCurrentPdfKey] = useState<string | null>(null); // Store the current PDF key
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const [pdfUrl, setPdfUrl] = useState(props.document);
+  const [initialLoad, setInitialLoad] = useState(true);
+  const [instance, setInstance] = useState<Instance | null>(null);
+  const [users, setUsers] = useState<any[]>([]); // Store users in state
+  const [boxSizes, setBoxSizes] = useState<any[]>([]); // Store bounding boxes for each user
 
   useEffect(() => {
-    if (pdfUrl && currentPdfKey) {
-      (async () => {
+    const storedUsers = sessionStorage.getItem("users");
+    const storedBoxSizes = sessionStorage.getItem("boxSizes");
+
+    if (storedUsers) {
+      setUsers(JSON.parse(storedUsers));
+    }
+
+    if (storedBoxSizes) {
+      setBoxSizes(JSON.parse(storedBoxSizes));
+    }
+
+    const loadPdf = async () => {
+      if (containerRef.current) {
         try {
           const instance = await PSPDFKit.load({
             container: containerRef.current,
@@ -35,248 +46,242 @@ const PDFViewerWithSignature = (props: any) => {
             baseUrl: `${window.location.protocol}//${window.location.host}/${
               import.meta.env.BASE_URL
             }`,
+
+            // trustedCAsCallback: async () => {
+            //   let arrayBuffer;
+            //   try {
+            //     const response = await fetch("/api/digitalSigningLite", {
+            //       method: "GET",
+            //       headers: {
+            //         "Content-Type": "application/json",
+            //       },
+            //     });
+
+            //     const apiRes = await response.json();
+            //     console.log(apiRes, "lnfsnsnvlsnvlsdnv");
+            //     arrayBuffer = atob(apiRes.data.data.ca_certificates[0]);
+            //     console.log(arrayBuffer, "arrayBuffer");
+            //   } catch (e) {
+            //     throw `Error ${e}`;
+            //   }
+            //   return [arrayBuffer];
+            // },
           });
 
           setInstance(instance);
 
-          const container = instance.contentDocument?.host;
+          console.log(PSPDFKit, "pspdfkit");
+          await console.log(instance.getSignaturesInfo());
 
-          container.addEventListener(
-            "dragover",
-            (e: React.DragEvent<HTMLDivElement>) => e.preventDefault()
-          );
-          container.addEventListener(
-            "drop",
-            async (e: React.DragEvent<HTMLDivElement>) => {
-              console.log("Drop event detected!");
-              await handleDrop(e, instance, PSPDFKit);
-            }
-          );
+          if (storedUsers && storedBoxSizes) {
+            const usersData = JSON.parse(storedUsers);
+            const boxData = JSON.parse(storedBoxSizes);
 
-          // Restore stored signature coordinates if available
-          const storedCoordinates = getStoredSignatureData(currentPdfKey);
-          if (storedCoordinates && storedCoordinates.length > 0) {
-            console.log(storedCoordinates, "storedcoordinates");
-            for (let coordinates of storedCoordinates) {
-              console.log(coordinates, "coordinatedssss");
-              const widget = new PSPDFKit.Annotations.TextAnnotation({
-                boundingBox: new PSPDFKit.Geometry.Rect({
-                  left: coordinates.left,
-                  top: coordinates.top,
-                  width: coordinates.width,
-                  height: coordinates.height,
-                }),
-                text: { format: "plain", value: "Sign for TestUser" },
-                formFieldName: "DigitalSignature",
-                id: PSPDFKit.generateInstantId(),
-                pageIndex: coordinates.pageIndex,
-                customData: { type: "ds" },
+            usersData.forEach((user: any, index: number) => {
+              const boundingBox = new PSPDFKit.Geometry.Rect(boxData[index]);
+              const instantId = `PSPDFKit.generateInstantId(${index})`;
+
+              const widget = new PSPDFKit.Annotations.WidgetAnnotation({
+                formFieldName: `SignatureField${index}`,
+                name: instantId,
+                id: instantId,
+                boundingBox: boundingBox,
+                pageIndex: 0,
               });
 
-              await instance.create([widget]);
-            }
+              const formField = new PSPDFKit.FormFields.SignatureFormField({
+                name: `SignatureField${index}`,
+                annotationIds: PSPDFKit.Immutable.List([widget.id]),
+                id: instantId,
+              });
+
+              instance.create([widget, formField]);
+            });
           }
         } catch (error) {
-          console.error("Error loading PSPDFKit:", error);
+          console.error("Error loading PSPDFKit", error);
         }
-      })();
-    }
+      }
+    };
+
+    loadPdf();
 
     return () => {
-      if (pdfUrl) PSPDFKit.unload(containerRef.current);
+      PSPDFKit.unload(containerRef.current);
     };
-  }, [pdfUrl, currentPdfKey]);
+  }, [pdfUrl]);
 
-  // Store multiple signature coordinates for each PDF
-  const storeSignatureData = (pdfKey: string, coordinates: any) => {
-    const existingData = sessionStorage.getItem("pdfSignatureData");
-    const signatureData = existingData ? JSON.parse(existingData) : {};
-
-    if (!signatureData[pdfKey]) {
-      signatureData[pdfKey] = []; // Initialize array if not present
+  const applySignature = async (index: number) => {
+    if (!instance) {
+      alert("PDF instance is not ready. Please try again.");
+      return;
     }
 
-    signatureData[pdfKey].push(coordinates); // Store the new signature box
-    sessionStorage.setItem("pdfSignatureData", JSON.stringify(signatureData));
-  };
+    try {
+      const doc = await instance.exportPDF();
+      const pdfBlob = new Blob([doc], { type: "application/pdf" });
 
-  // Retrieve all stored signature coordinates for a specific PDF
-  const getStoredSignatureData = (pdfKey: string) => {
-    const storedData = sessionStorage.getItem("pdfSignatureData");
-    if (storedData) {
-      const parsedData = JSON.parse(storedData);
-      return parsedData[pdfKey] || [];
-    }
-    return [];
-  };
+      const imageBlob = await imageToBlob(
+        `${window.location.protocol}//${window.location.host}/signed/watermark.jpg`
+      );
 
-  const onDragStart = (
-    event: React.DragEvent<HTMLDivElement>,
-    type: string
-  ) => {
-    console.log("Drag started...");
-    const instantId = PSPDFKit.generateInstantId();
-    const data = `don%don%${instantId}%${type}`;
+      const formData = new FormData();
+      formData.append("file", pdfBlob);
+      formData.append("image", imageBlob);
 
-    (event.target as HTMLDivElement).style.opacity = "0.8";
-    const img = document.getElementById(`${type}-icon`);
-    if (img) {
-      event.dataTransfer.setDragImage(img, 10, 10);
-    }
-    event.dataTransfer.setData("text/plain", data);
-    event.dataTransfer.dropEffect = "move";
-  };
+      formData.append(
+        "data",
+        JSON.stringify({
+          signatureType: "cades",
+          flatten: true,
+          cadesLevel: "b-lt",
+          appearance: {
+            mode: "signatureAndDescription",
+          },
+          formFieldName: `SignatureField${index}`,
+          signatureMetadata: {
+            signerName: users[index].name,
+            signatureReason: "User-specific digital signature",
+            signatureLocation: "Planet Earth",
+          },
+        })
+      );
 
-  const onDragEnd = (event: React.DragEvent<HTMLDivElement>) => {
-    (event.target as HTMLDivElement).style.opacity = "1";
-    console.log("Drag Ended...");
-  };
-
-  const handleDrop = async (e: any, inst: any, PSPDFKit: any) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    console.log("handleDrop...");
-
-    const dataArray = e.dataTransfer.getData("text").split("%");
-
-    console.log(dataArray, "dataArrayyyy");
-    let [name, email, instantId, annotationType] = dataArray;
-    instantId = PSPDFKit.generateInstantId();
-    const pageIndex = 0;
-    const rectWidth = 250;
-    const rectHeight = 100;
-
-    const clientRect = new PSPDFKit.Geometry.Rect({
-      left: e.clientX - rectWidth / 2,
-      top: e.clientY - rectHeight / 2,
-      width: rectWidth,
-      height: rectHeight,
-    });
-
-    const pageRect = inst.transformContentClientToPageSpace(
-      clientRect,
-      pageIndex
-    ) as any;
-
-    // Store the signature box coordinates specific to this PDF
-    if (currentPdfKey) {
-      storeSignatureData(currentPdfKey, {
-        left: pageRect.left,
-        top: pageRect.top,
-        width: pageRect.width,
-        height: pageRect.height,
-        pageIndex: pageIndex,
+      const apiToken = "pdf_live_WKG7wzzkzLyeguZL3QTFVhbGvIo2smCYQgCp5JVTKc0";
+      const res = await axios.post("https://api.pspdfkit.com/sign", formData, {
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "multipart/form-data",
+        },
+        responseType: "arraybuffer",
       });
-    }
 
-    console.log(pageRect, "PageRect");
-    const widget = new PSPDFKit.Annotations.TextAnnotation({
-      boundingBox: pageRect,
-      text: { format: "plain", value: "Sign for TestUser" },
-      formFieldName: "DigitalSignature",
-      id: instantId,
-      pageIndex,
-      name: instantId,
-      customData: { signerEmail: email, type: annotationType },
-      font: "Helvetica",
-      fontSize: 14,
-      horizontalAlign: "center",
-      verticalAlign: "center",
-      isEditable: false,
-    });
+      const container = containerRef.current;
+      if (container && res.data) {
+        const signedPdfBlob = new Blob([res.data], { type: "application/pdf" });
+        const newPdfUrl = URL.createObjectURL(signedPdfBlob);
+        setInitialLoad(false);
+        setPdfUrl(newPdfUrl);
 
-    const formField = new PSPDFKit.FormFields.SignatureFormField({
-      annotationIds: PSPDFKit.Immutable.List([widget.id]),
-      name: "DigitalSignature",
-      id: instantId,
-    });
+        const updatedUsers = [...users];
+        updatedUsers[index].signed = true;
+        setUsers(updatedUsers);
 
-    await inst.create([widget, formField]);
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    console.log(files, "filessss");
-    if (files) {
-      const fileArray = Array.from(files);
-      setUploadedFiles((prev) => [...prev, ...fileArray]);
-
-      const base64Pdf = await fileToBase64(fileArray[0]);
-      const pdfKey = generatePdfKey(fileArray[0]);
-      setCurrentPdfKey(pdfKey); // Update current PDF key
-      setPdfUrl(base64Pdf);
+        sessionStorage.setItem("users", JSON.stringify(updatedUsers));
+      } else {
+        alert("Error in signing");
+      }
+    } catch (err) {
+      console.log(err);
+      alert(
+        "An error occurred while applying the signature. Please try again."
+      );
     }
   };
 
-  const handleFileClick = (file: File) => {
-    console.log(file, "file");
-    fileToBase64(file).then((base64Pdf) => {
-      const pdfKey = generatePdfKey(file);
-      setCurrentPdfKey(pdfKey); // Update current PDF key
-      setPdfUrl(base64Pdf); // Load the clicked PDF file
-    });
+  const addNew = async () => {
+    const name = window.prompt("Enter signee's name:");
+    const email = window.prompt("Enter signee's email:");
+
+    if (name && email && instance) {
+      const instantId = `PSPDFKit.generateInstantId(${users.length})`;
+
+      const boundingBox = new PSPDFKit.Geometry.Rect({
+        left: 50 + users.length * 180,
+        top: 550,
+        width: 150,
+        height: 100,
+      });
+
+      const widget = new PSPDFKit.Annotations.WidgetAnnotation({
+        formFieldName: `SignatureField${users.length}`,
+        name: instantId,
+        id: instantId,
+        boundingBox: boundingBox,
+        pageIndex: 0,
+      });
+
+      const formField = new PSPDFKit.FormFields.SignatureFormField({
+        name: `SignatureField${users.length}`,
+        annotationIds: PSPDFKit.Immutable.List([widget.id]),
+        id: instantId,
+      });
+
+      console.log(formField, "formfield");
+
+      await instance.create([widget, formField]);
+
+      const updatedUsers = [...users, { name, email, signed: false }];
+      const updatedBoxSizes = [...boxSizes, boundingBox];
+
+      setUsers(updatedUsers);
+      setBoxSizes(updatedBoxSizes);
+
+      sessionStorage.setItem("users", JSON.stringify(updatedUsers));
+      sessionStorage.setItem("boxSizes", JSON.stringify(updatedBoxSizes));
+    }
+  };
+
+  const handleFileUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const newPdfUrl = URL.createObjectURL(file);
+      setPdfUrl(newPdfUrl);
+    }
   };
 
   return (
     <div>
+      <div ref={containerRef} style={{ height: "100vh", width: "100%" }} />
+
       <div
         style={{
           position: "absolute",
-          top: "45px",
-          right: "0px",
-          width: "20%",
+          top: "60px",
+          left: "20px",
+          border: "2px solid",
+          borderRadius: "10px",
           padding: "10px",
+          width: "200px",
         }}
       >
-        <input type="file" multiple onChange={handleFileChange} />
-        <h3>Uploaded Files:</h3>
-        <ul>
-          {uploadedFiles.map((file, index) => (
-            <li
-              key={index}
-              onClick={() => handleFileClick(file)}
-              style={{ cursor: "pointer" }}
-            >
-              {file.name}
-            </li>
-          ))}
-        </ul>
-      </div>
+        <button onClick={addNew} style={{ border: "1px solid" }}>
+          Add New
+        </button>
 
-      {pdfUrl ? (
-        <>
-          <div ref={containerRef} style={{ height: "100vh", width: "77%" }} />
-          <div
-            style={{
-              position: "absolute",
-              top: "60px",
-              left: "20px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "20px",
-            }}
-          >
-            <div
-              draggable
-              onDragStart={(e) => onDragStart(e, "ds")}
-              onDragEnd={onDragEnd}
-            >
-              Drag to apply
-            </div>
-          </div>
-        </>
-      ) : (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <h4>Please upload a file</h4>
+        <div style={{ marginTop: "20px" }}>
+          {users.length === 0 ? (
+            <p>No users added yet.</p>
+          ) : (
+            users.map((user, index) => (
+              <div key={index} style={{ marginBottom: "10px" }}>
+                <button
+                  onClick={() => applySignature(index)}
+                  style={{
+                    width: "100%",
+                    padding: "5px",
+                    backgroundColor: "#f0f0f0",
+                    border: "1px solid #ccc",
+                    borderRadius: "5px",
+                  }}
+                >
+                  Sign for {user.name}
+                </button>
+              </div>
+            ))
+          )}
         </div>
-      )}
+
+        <div style={{ marginTop: "20px" }}>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handleFileUpload}
+          />
+        </div>
+      </div>
     </div>
   );
 };
