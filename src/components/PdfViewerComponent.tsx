@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import PSPDFKit, { Instance } from "pspdfkit";
 import axios from "axios";
 
+// Helper function to convert an image URL to a Blob
 async function imageToBlob(imageUrl: string): Promise<Blob> {
   try {
     const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error("Network response was not ok");
-    }
-    const blob = await response.blob();
-    return blob;
+    if (!response.ok) throw new Error("Network response was not ok");
+    return response.blob();
   } catch (error) {
     console.error("Error fetching image:", error);
     throw error;
@@ -18,24 +16,60 @@ async function imageToBlob(imageUrl: string): Promise<Blob> {
 
 const PDFViewerWithSignature = (props: any) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-
   const [pdfUrl, setPdfUrl] = useState(props.document);
   const [initialLoad, setInitialLoad] = useState(true);
   const [instance, setInstance] = useState<Instance | null>(null);
-  const [users, setUsers] = useState<any[]>([]); // Store users in state
-  const [boxSizes, setBoxSizes] = useState<any[]>([]); // Store bounding boxes for each user
+  const [users, setUsers] = useState<any[]>([]);
+  const [boxSizes, setBoxSizes] = useState<any[]>([]);
+
+
+  const fetchCertificates = async (): Promise<(string | ArrayBuffer)[]> => {
+    try {
+      const apiToken = "pdf_live_edhWMQdqBzrIOh3VxFLhuFXtMP53XPxr77ye2PKC3lf";
+      const response = await fetch('https://api.pspdfkit.com/i/certificates', {
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch certificates: ${response.statusText}`);
+      }
+
+      const apiRes = await response.json();
+      console.log(apiRes, "Certificate API response");
+
+      // Validate the structure of the response
+      const certificates = apiRes?.data?.data?.ca_certificates;
+
+      if (!certificates || certificates.length === 0) {
+        console.warn("No certificates found in API response.");
+        return [];
+      }
+
+      // Decode the first certificate
+      const certificate = atob(certificates[0]);
+
+      // setPspdfcertificates([certificate]);
+
+      return [certificate]; // Return as an array
+    } catch (error) {
+      console.error("Error in fetching certificates:", error);
+      return []; // Ensure an empty array is returned on error
+    }
+  };
+
+
+
 
   useEffect(() => {
     const storedUsers = sessionStorage.getItem("users");
     const storedBoxSizes = sessionStorage.getItem("boxSizes");
+    if (storedUsers) setUsers(JSON.parse(storedUsers));
+    if (storedBoxSizes) setBoxSizes(JSON.parse(storedBoxSizes));
 
-    if (storedUsers) {
-      setUsers(JSON.parse(storedUsers));
-    }
 
-    if (storedBoxSizes) {
-      setBoxSizes(JSON.parse(storedBoxSizes));
-    }
 
     const loadPdf = async () => {
       if (containerRef.current) {
@@ -43,35 +77,43 @@ const PDFViewerWithSignature = (props: any) => {
           const instance = await PSPDFKit.load({
             container: containerRef.current,
             document: pdfUrl,
-            baseUrl: `${window.location.protocol}//${window.location.host}/${
-              import.meta.env.BASE_URL
-            }`,
-
+            baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL
+              }`,
             // trustedCAsCallback: async () => {
             //   let arrayBuffer;
             //   try {
-            //     const response = await fetch("/api/digitalSigningLite", {
-            //       method: "GET",
+            //     const apiToken = "pdf_live_4RnPyPld7kARJ3LnQgLqOMyiNhDoP3AnZ2tlWYZweSV";
+            //     const response = await axios.get('https://api.pspdfkit.com/i/certificates', {
             //       headers: {
+            //         'Authorization': `Bearer ${apiToken}`,
             //         "Content-Type": "application/json",
             //       },
             //     });
 
             //     const apiRes = await response.json();
-            //     console.log(apiRes, "lnfsnsnvlsnvlsdnv");
+            //     console.log(apiRes);
             //     arrayBuffer = atob(apiRes.data.data.ca_certificates[0]);
-            //     console.log(arrayBuffer, "arrayBuffer");
             //   } catch (e) {
             //     throw `Error ${e}`;
             //   }
             //   return [arrayBuffer];
-            // },
+            // }
+            trustedCAsCallback: fetchCertificates,
           });
+
+          const signaturesInfo = await instance.getSignaturesInfo();
+          console.log(signaturesInfo, "Signature Info");
 
           setInstance(instance);
 
-          console.log(PSPDFKit, "pspdfkit");
-          await console.log(instance.getSignaturesInfo());
+          instance.setViewState((viewState) =>
+            viewState.set(
+              "showSignatureValidationStatus",
+              PSPDFKit.ShowSignatureValidationStatusMode.IF_SIGNED
+            )
+          );
+
+          // console.log(await instance.getSignaturesInfo(), "Signature Info");
 
           if (storedUsers && storedBoxSizes) {
             const usersData = JSON.parse(storedUsers);
@@ -104,7 +146,10 @@ const PDFViewerWithSignature = (props: any) => {
       }
     };
 
+    // fetchCertificates();
     loadPdf();
+
+
 
     return () => {
       PSPDFKit.unload(containerRef.current);
@@ -118,6 +163,7 @@ const PDFViewerWithSignature = (props: any) => {
     }
 
     try {
+      const certificateBase64 = await fetchCertificates();
       const doc = await instance.exportPDF();
       const pdfBlob = new Blob([doc], { type: "application/pdf" });
 
@@ -128,26 +174,30 @@ const PDFViewerWithSignature = (props: any) => {
       const formData = new FormData();
       formData.append("file", pdfBlob);
       formData.append("image", imageBlob);
-
       formData.append(
         "data",
         JSON.stringify({
           signatureType: "cades",
           flatten: true,
           cadesLevel: "b-lt",
+          hashAlgorithm: "sha256",
           appearance: {
             mode: "signatureAndDescription",
           },
+          certificates: certificateBase64, // Embed certificate here
           formFieldName: `SignatureField${index}`,
+          signatureContainer: "pkcs7",
+          signingToken: "user-1-with-rights",
           signatureMetadata: {
             signerName: users[index].name,
             signatureReason: "User-specific digital signature",
-            signatureLocation: "Planet Earth",
+            signatureLocation: "Earth",
+            signingTime: new Date().toISOString(),
           },
         })
       );
 
-      const apiToken = "pdf_live_WKG7wzzkzLyeguZL3QTFVhbGvIo2smCYQgCp5JVTKc0";
+      const apiToken = "pdf_live_edhWMQdqBzrIOh3VxFLhuFXtMP53XPxr77ye2PKC3lf";
       const res = await axios.post("https://api.pspdfkit.com/sign", formData, {
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -156,8 +206,11 @@ const PDFViewerWithSignature = (props: any) => {
         responseType: "arraybuffer",
       });
 
-      const container = containerRef.current;
-      if (container && res.data) {
+      // console.log(await instance.getSignaturesInfo(), "Signature Info");
+      // console.log(await instance.getFormFields(), "Form Fields Info");
+
+
+      if (containerRef.current && res.data) {
         const signedPdfBlob = new Blob([res.data], { type: "application/pdf" });
         const newPdfUrl = URL.createObjectURL(signedPdfBlob);
         setInitialLoad(false);
@@ -166,16 +219,14 @@ const PDFViewerWithSignature = (props: any) => {
         const updatedUsers = [...users];
         updatedUsers[index].signed = true;
         setUsers(updatedUsers);
-
         sessionStorage.setItem("users", JSON.stringify(updatedUsers));
       } else {
         alert("Error in signing");
       }
+
     } catch (err) {
-      console.log(err);
-      alert(
-        "An error occurred while applying the signature. Please try again."
-      );
+      console.error(err);
+      alert("An error occurred while applying the signature. Please try again.");
     }
   };
 
@@ -207,8 +258,6 @@ const PDFViewerWithSignature = (props: any) => {
         id: instantId,
       });
 
-      console.log(formField, "formfield");
-
       await instance.create([widget, formField]);
 
       const updatedUsers = [...users, { name, email, signed: false }];
@@ -222,9 +271,7 @@ const PDFViewerWithSignature = (props: any) => {
     }
   };
 
-  const handleFileUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const newPdfUrl = URL.createObjectURL(file);
