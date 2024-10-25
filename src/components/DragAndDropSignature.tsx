@@ -39,7 +39,7 @@ const PDFViewerWithSignature = (props: any) => {
 
           setInstance(instance);
 
-        //   await validateSignatures(instance);
+        //await validateSignatures(instance);
 
           console.log(PSPDFKit, "pspdfkit");
 
@@ -149,8 +149,6 @@ const PDFViewerWithSignature = (props: any) => {
       JSON.stringify({ [currentPdfKey]: updatedCoordinates })
     );
   };
-
-
 
   const onDragStart = (
     event: React.DragEvent<HTMLDivElement>,

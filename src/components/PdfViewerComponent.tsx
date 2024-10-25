@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import PSPDFKit, { Instance } from "pspdfkit";
 import axios from "axios";
 
-// Helper function to convert an image URL to a Blob
 async function imageToBlob(imageUrl: string): Promise<Blob> {
   try {
     const response = await fetch(imageUrl);
@@ -14,18 +13,36 @@ async function imageToBlob(imageUrl: string): Promise<Blob> {
   }
 }
 
+// Convert a file to a base64 string
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+// Utility to generate a unique key for each PDF based on its name or content
+const generatePdfKey = (file: File | string) => {
+  if (typeof file === "string") return file; // For base64 strings or URLs
+  return file.name; // Use the file name as the key
+};
+
 const PDFViewerWithSignature = (props: any) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [pdfUrl, setPdfUrl] = useState(props.document);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [instance, setInstance] = useState<Instance | null>(null);
+  const [currentPdfKey, setCurrentPdfKey] = useState<string | null>(null); // Store the current PDF key
   const [users, setUsers] = useState<any[]>([]);
   const [boxSizes, setBoxSizes] = useState<any[]>([]);
 
 
   const fetchCertificates = async (): Promise<(string | ArrayBuffer)[]> => {
     try {
-      const apiToken = "pdf_live_edhWMQdqBzrIOh3VxFLhuFXtMP53XPxr77ye2PKC3lf";
+      const apiToken = "pdf_live_BgA8uC4CPtIW9owbKevFduEn6OCGFAiPRQgWxDQOqrc";
       const response = await fetch('https://api.pspdfkit.com/i/certificates', {
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -38,9 +55,8 @@ const PDFViewerWithSignature = (props: any) => {
       }
 
       const apiRes = await response.json();
-      console.log(apiRes, "Certificate API response");
+      // console.log(apiRes, "Certificate API response");
 
-      // Validate the structure of the response
       const certificates = apiRes?.data?.data?.ca_certificates;
 
       if (!certificates || certificates.length === 0) {
@@ -48,10 +64,7 @@ const PDFViewerWithSignature = (props: any) => {
         return [];
       }
 
-      // Decode the first certificate
       const certificate = atob(certificates[0]);
-
-      // setPspdfcertificates([certificate]);
 
       return [certificate]; // Return as an array
     } catch (error) {
@@ -60,44 +73,22 @@ const PDFViewerWithSignature = (props: any) => {
     }
   };
 
-
-
-
   useEffect(() => {
     const storedUsers = sessionStorage.getItem("users");
     const storedBoxSizes = sessionStorage.getItem("boxSizes");
     if (storedUsers) setUsers(JSON.parse(storedUsers));
     if (storedBoxSizes) setBoxSizes(JSON.parse(storedBoxSizes));
 
-
-
     const loadPdf = async () => {
       if (containerRef.current) {
         try {
+
+          await PSPDFKit.unload(containerRef.current);
+
           const instance = await PSPDFKit.load({
             container: containerRef.current,
             document: pdfUrl,
-            baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL
-              }`,
-            // trustedCAsCallback: async () => {
-            //   let arrayBuffer;
-            //   try {
-            //     const apiToken = "pdf_live_4RnPyPld7kARJ3LnQgLqOMyiNhDoP3AnZ2tlWYZweSV";
-            //     const response = await axios.get('https://api.pspdfkit.com/i/certificates', {
-            //       headers: {
-            //         'Authorization': `Bearer ${apiToken}`,
-            //         "Content-Type": "application/json",
-            //       },
-            //     });
-
-            //     const apiRes = await response.json();
-            //     console.log(apiRes);
-            //     arrayBuffer = atob(apiRes.data.data.ca_certificates[0]);
-            //   } catch (e) {
-            //     throw `Error ${e}`;
-            //   }
-            //   return [arrayBuffer];
-            // }
+            baseUrl: `${window.location.protocol}//${window.location.host}/${import.meta.env.BASE_URL}`,
             trustedCAsCallback: fetchCertificates,
           });
 
@@ -112,8 +103,6 @@ const PDFViewerWithSignature = (props: any) => {
               PSPDFKit.ShowSignatureValidationStatusMode.IF_SIGNED
             )
           );
-
-          // console.log(await instance.getSignaturesInfo(), "Signature Info");
 
           if (storedUsers && storedBoxSizes) {
             const usersData = JSON.parse(storedUsers);
@@ -146,13 +135,12 @@ const PDFViewerWithSignature = (props: any) => {
       }
     };
 
-    // fetchCertificates();
     loadPdf();
 
-
-
     return () => {
-      PSPDFKit.unload(containerRef.current);
+      if (containerRef.current) {
+        PSPDFKit.unload(containerRef.current)
+      }
     };
   }, [pdfUrl]);
 
@@ -167,9 +155,13 @@ const PDFViewerWithSignature = (props: any) => {
       const doc = await instance.exportPDF();
       const pdfBlob = new Blob([doc], { type: "application/pdf" });
 
+      console.log(doc,pdfBlob, "doc and pdfblob")
+
       const imageBlob = await imageToBlob(
         `${window.location.protocol}//${window.location.host}/signed/watermark.jpg`
       );
+
+      console.log(imageBlob, "imageBlob")
 
       const formData = new FormData();
       formData.append("file", pdfBlob);
@@ -197,7 +189,7 @@ const PDFViewerWithSignature = (props: any) => {
         })
       );
 
-      const apiToken = "pdf_live_edhWMQdqBzrIOh3VxFLhuFXtMP53XPxr77ye2PKC3lf";
+      const apiToken = "pdf_live_BgA8uC4CPtIW9owbKevFduEn6OCGFAiPRQgWxDQOqrc";
       const res = await axios.post("https://api.pspdfkit.com/sign", formData, {
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -205,10 +197,6 @@ const PDFViewerWithSignature = (props: any) => {
         },
         responseType: "arraybuffer",
       });
-
-      // console.log(await instance.getSignaturesInfo(), "Signature Info");
-      // console.log(await instance.getFormFields(), "Form Fields Info");
-
 
       if (containerRef.current && res.data) {
         const signedPdfBlob = new Blob([res.data], { type: "application/pdf" });
@@ -223,9 +211,8 @@ const PDFViewerWithSignature = (props: any) => {
       } else {
         alert("Error in signing");
       }
-
     } catch (err) {
-      console.error(err);
+      // console.error(err);
       alert("An error occurred while applying the signature. Please try again.");
     }
   };
@@ -279,9 +266,56 @@ const PDFViewerWithSignature = (props: any) => {
     }
   };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      const fileArray = Array.from(files);
+      setUploadedFiles((prev) => [...prev, ...fileArray]);
+
+      const base64Pdf = await fileToBase64(fileArray[0]);
+      const pdfKey = generatePdfKey(fileArray[0]);
+
+      setCurrentPdfKey(pdfKey); // Update current PDF key
+      setPdfUrl(base64Pdf);
+      console.log(pdfKey, "pdfKey");
+    }
+  };
+
+  const handleFileClick = (file: File) => {
+    fileToBase64(file).then((base64Pdf) => {
+      const pdfKey = generatePdfKey(file);
+      setCurrentPdfKey(pdfKey); // Update current PDF key
+      setPdfUrl(base64Pdf); // Load the clicked PDF file
+    });
+  };
+
   return (
     <div>
       <div ref={containerRef} style={{ height: "100vh", width: "100%" }} />
+
+      <div
+        style={{
+          position: "absolute",
+          top: "45px",
+          right: "0px",
+          width: "20%",
+          padding: "10px",
+        }}
+      >
+        <input type="file" multiple onChange={handleFileChange} />
+        <h3>Uploaded Files:</h3>
+        <ul>
+          {uploadedFiles.map((file, index) => (
+            <li
+              key={index}
+              onClick={() => handleFileClick(file)}
+              style={{ cursor: "pointer" }}
+            >
+              {file.name}
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <div
         style={{
