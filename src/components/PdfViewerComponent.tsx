@@ -42,7 +42,7 @@ const PDFViewerWithSignature = (props: any) => {
 
   const fetchCertificates = async (): Promise<(string | ArrayBuffer)[]> => {
     try {
-      const apiToken = "pdf_live_BgA8uC4CPtIW9owbKevFduEn6OCGFAiPRQgWxDQOqrc";
+      const apiToken = "pdf_live_L5jp5MzQUIqlauGbnUEdBfoNor3GxVyg2a6xKUdyKBe";
       const response = await fetch('https://api.pspdfkit.com/i/certificates', {
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -104,6 +104,12 @@ const PDFViewerWithSignature = (props: any) => {
             )
           );
 
+          // if (users.length > 0) {
+          //   users.forEach((user, index) => {
+          //     if (user.signed) applySignature(index); // Reapply signature if already signed
+          //   });
+          // }
+
           if (storedUsers && storedBoxSizes) {
             const usersData = JSON.parse(storedUsers);
             const boxData = JSON.parse(storedBoxSizes);
@@ -153,6 +159,7 @@ const PDFViewerWithSignature = (props: any) => {
     try {
       const certificateBase64 = await fetchCertificates();
       const doc = await instance.exportPDF();
+      console.log(doc, "docccc");
       const pdfBlob = new Blob([doc], { type: "application/pdf" });
 
       console.log(doc,pdfBlob, "doc and pdfblob")
@@ -189,7 +196,9 @@ const PDFViewerWithSignature = (props: any) => {
         })
       );
 
-      const apiToken = "pdf_live_BgA8uC4CPtIW9owbKevFduEn6OCGFAiPRQgWxDQOqrc";
+      
+
+      const apiToken = "pdf_live_L5jp5MzQUIqlauGbnUEdBfoNor3GxVyg2a6xKUdyKBe";
       const res = await axios.post("https://api.pspdfkit.com/sign", formData, {
         headers: {
           Authorization: `Bearer ${apiToken}`,
@@ -198,9 +207,12 @@ const PDFViewerWithSignature = (props: any) => {
         responseType: "arraybuffer",
       });
 
+      console.log(res, "response");
+
       if (containerRef.current && res.data) {
         const signedPdfBlob = new Blob([res.data], { type: "application/pdf" });
         const newPdfUrl = URL.createObjectURL(signedPdfBlob);
+        console.log(newPdfUrl, "newPdfUrl")
         setInitialLoad(false);
         setPdfUrl(newPdfUrl);
 
